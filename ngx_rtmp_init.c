@@ -257,6 +257,15 @@ ngx_rtmp_close_connection(ngx_connection_t *c)
 
     ngx_log_debug0(NGX_LOG_DEBUG_RTMP, c->log, 0, "close connection");
 
+#if (NGX_RTMP_SSL)
+
+    if (c->ssl) {
+        c->ssl->no_wait_shutdown = 1;
+        (void) ngx_ssl_shutdown(c);
+    }
+
+#endif
+
 #if (NGX_STAT_STUB)
     (void) ngx_atomic_fetch_add(ngx_stat_active, -1);
 #endif
