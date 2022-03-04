@@ -69,6 +69,13 @@ Table of Contents
     * [push](#push)
     * [push_reconnect](#push_reconnect)
     * [session_relay](#session_relay)
+    * [rtmp_relay_ssl_protocols](#rtmp_relay_ssl_protocols)
+    * [rtmp_relay_ssl_ciphers](#rtmp_relay_ssl_ciphers)
+    * [rtmp_relay_ssl_server_name](#rtmp_relay_ssl_server_name)
+    * [rtmp_relay_ssl_verify](#rtmp_relay_ssl_verify)
+    * [rtmp_relay_ssl_verify_depth](#rtmp_relay_ssl_verify_depth)
+    * [rtmp_relay_ssl_trusted_certificate](#rtmp_relay_ssl_trusted_certificate)
+    * [rtmp_relay_ssl_crl](#rtmp_relay_ssl_crl)
 * [Notify](#notify)
     * [on_connect](#on_connect)
     * [on_play](#on_play)
@@ -913,6 +920,8 @@ all local streams within application are pulled
 * start - start time in seconds
 * stop - stop time in seconds
 * static - makes pull static, such pull is created at nginx start
+* ssl_server_name - overrides rtmp_relay_ssl_server_name directive, values: on, off
+* ssl_verify - overrides rtmp_relay_ssl_verify directive, values: on, off
 
 If a value for a parameter contains spaces then you should use quotes around
 the **WHOLE** key=value pair like this : `'pageUrl=FAKE PAGE URL'`.
@@ -948,6 +957,71 @@ When the setting is off relay is destroyed when stream is closed so that another
 could possibly be created later. Default is off.
 ```sh
 session_relay on;
+```
+
+#### rtmp_relay_ssl_protocols  
+Syntax: `rtmp_relay_ssl_protocols [SSLv2] [SSLv3] [TLSv1] [TLSv1.1] [TLSv1.2] [TLSv1.3];`  
+Context: rtmp, server, application  
+
+Enables the specified protocols for streams pushed/pulled to/from the RTMPS server. Default is TLSv1 TLSv1.1 TLSv1.2.
+```sh
+rtmp_relay_ssl_protocols TLSv1.2 TLSv1.3;
+```
+
+#### rtmp_relay_ssl_ciphers  
+Syntax: `rtmp_relay_ssl_ciphers ciphers;`  
+Context: rtmp, server, application  
+
+Specifies the enabled ciphers for for streams pushed/pulled to/from the RTMPS server. The ciphers are specified in the format understood by the OpenSSL library. Default is openssl `DEFAULT`.  
+
+The full list can be viewed using the `openssl ciphers` command.  
+```sh
+rtmp_relay_ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384;
+```
+
+#### rtmp_relay_ssl_server_name  
+Syntax: `rtmp_relay_ssl_server_name on | off;`  
+Context: rtmp, server, application  
+
+Enables or disables passing of the server name through TLS Server Name Indication extension (SNI, RFC 6066) when establishing a connection with the RTMPS server. Default is on.  
+```sh
+rtmp_relay_ssl_server_name on;
+```
+
+#### rtmp_relay_ssl_verify  
+Syntax: `rtmp_relay_ssl_verify on | off;`  
+Context: rtmp, server, application  
+
+Enables or disables verification of the RTMPS server certificate. Note you must set the rtmp_relay_ssl_trusted_certificate. Default is on.   
+```sh
+rtmp_relay_ssl_verify on;
+```
+
+#### rtmp_relay_ssl_verify_depth  
+Syntax: `rtmp_relay_ssl_verify_depth number;`  
+Context: rtmp, server, application  
+
+Sets the verification depth in the RTMPS server certificates chain. Default is 1.  
+```sh
+rtmp_relay_ssl_verify_depth 1;
+```
+
+#### rtmp_relay_ssl_trusted_certificate  
+Syntax: `rtmp_relay_ssl_trusted_certificate file;`  
+Context: rtmp, server, application  
+
+Specifies a file with trusted CA certificates in the PEM format used to verify the certificate of the RTMPS server. No default set.  
+```sh
+rtmp_relay_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+```
+
+#### rtmp_relay_ssl_crl  
+Syntax: `rtmp_relay_ssl_crl file;`  
+Context: rtmp, server, application  
+
+Specifies a file with revoked certificates (CRL) in the PEM format used to verify the certificate of the RTMPS server. No default set.  
+```sh
+rtmp_relay_ssl_crl /etc/ssl/certs/crl.crt;
 ```
 
 ## Notify
