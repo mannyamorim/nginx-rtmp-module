@@ -812,6 +812,10 @@ ngx_rtmp_relay_publish(ngx_rtmp_session_t *s, ngx_rtmp_publish_t *v)
     name.len = ngx_strlen(v->name);
     name.data = v->name;
 
+    if (ctx == NULL) {
+        ctx = ngx_rtmp_relay_create_local_ctx(s, &name, NULL);
+    }
+
     t = racf->pushes.elts;
     for (n = 0; n < racf->pushes.nelts; ++n, ++t) {
         target = *t;
