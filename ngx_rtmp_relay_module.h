@@ -114,5 +114,15 @@ ngx_int_t ngx_rtmp_relay_pull(ngx_rtmp_session_t *s, ngx_str_t *name,
 ngx_int_t ngx_rtmp_relay_push(ngx_rtmp_session_t *s, ngx_str_t *name,
                               ngx_rtmp_relay_target_t *target);
 
+#if (NGX_RTMP_SSL)
+
+ngx_int_t ngx_rtmp_relay_configure_ssl_name(ngx_pool_t *pool, ngx_str_t url,
+                                            ngx_str_t *ssl_name);
+ngx_int_t ngx_rtmp_relay_configure_ssl(ngx_conf_t *cf,
+                                       ngx_rtmp_relay_app_conf_t *racf,
+                                       ngx_rtmp_relay_target_t *target);
+
+#endif
+
 
 #endif /* _NGX_RTMP_RELAY_H_INCLUDED_ */

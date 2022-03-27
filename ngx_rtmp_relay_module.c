@@ -38,10 +38,6 @@ static void ngx_rtmp_ssl_handshake_handler(ngx_connection_t *c);
 static void ngx_rtmp_ssl_handshake(ngx_rtmp_session_t *rs);
 static ngx_int_t ngx_rtmp_ssl_name(ngx_rtmp_session_t *rs,
         ngx_rtmp_relay_target_t *target);
-static ngx_int_t ngx_rtmp_configure_ssl_name(ngx_pool_t *pool,
-        ngx_str_t url, ngx_str_t *ssl_name);
-static ngx_int_t ngx_rtmp_configure_ssl(ngx_conf_t *cf,
-        ngx_rtmp_relay_app_conf_t *racf, ngx_rtmp_relay_target_t *target);
 
 #endif
 
@@ -317,7 +313,7 @@ ngx_rtmp_relay_merge_app_conf(ngx_conf_t *cf, void *parent, void *child)
         ngx_rtmp_relay_target_t  *target;                                     \
         for (i = 0; i < (arr).nelts; i++) {                                   \
             target = *((ngx_rtmp_relay_target_t **)((arr).elts) + i);         \
-            if (ngx_rtmp_configure_ssl(cf, conf, target)                      \
+            if (ngx_rtmp_relay_configure_ssl(cf, conf, target)                \
                     != NGX_OK) {                                              \
                 return NGX_CONF_ERROR;                                        \
             }                                                                 \
@@ -1828,8 +1824,8 @@ ngx_rtmp_relay_push_pull(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         target->ssl_server_name = NGX_CONF_UNSET;
         target->ssl_verify = NGX_CONF_UNSET;
 
-        if (ngx_rtmp_configure_ssl_name(cf->pool, u->url,
-                                        &target->ssl_name) != NGX_OK) {
+        if (ngx_rtmp_relay_configure_ssl_name(cf->pool, u->url,
+                                              &target->ssl_name) != NGX_OK) {
             return NGX_CONF_ERROR;
         }
     }
@@ -2216,8 +2212,9 @@ ngx_rtmp_ssl_name(ngx_rtmp_session_t *rs, ngx_rtmp_relay_target_t *target)
     return NGX_OK;
 }
 
-static ngx_int_t
-ngx_rtmp_configure_ssl_name(ngx_pool_t *pool, ngx_str_t url, ngx_str_t *ssl_name)
+ngx_int_t
+ngx_rtmp_relay_configure_ssl_name(ngx_pool_t *pool, ngx_str_t url,
+        ngx_str_t *ssl_name)
 {
     u_char *host, *port, *last, *uri, *args, *p;
 
@@ -2269,8 +2266,8 @@ err:
 }
 
 
-static ngx_int_t
-ngx_rtmp_configure_ssl(ngx_conf_t *cf, ngx_rtmp_relay_app_conf_t *racf,
+ngx_int_t
+ngx_rtmp_relay_configure_ssl(ngx_conf_t *cf, ngx_rtmp_relay_app_conf_t *racf,
         ngx_rtmp_relay_target_t *target)
 {
     ngx_pool_cleanup_t  *cln;
