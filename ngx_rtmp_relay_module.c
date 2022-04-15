@@ -1823,11 +1823,6 @@ ngx_rtmp_relay_push_pull(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         target->is_rtmps = 1;
         target->ssl_server_name = NGX_CONF_UNSET;
         target->ssl_verify = NGX_CONF_UNSET;
-
-        if (ngx_rtmp_relay_configure_ssl_name(cf->pool, u->url,
-                                              &target->ssl_name) != NGX_OK) {
-            return NGX_CONF_ERROR;
-        }
     }
 
 #endif
@@ -1839,6 +1834,22 @@ ngx_rtmp_relay_push_pull(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         }
         return NGX_CONF_ERROR;
     }
+
+#if (NGX_RTMP_SSL)
+
+    if (target->is_rtmps) {
+        /* ssl_name must be NULL terminated, so duplicate it */
+        target->ssl_name.data = ngx_pnalloc(cf->pool, u->host.len + 1);
+        if (target->ssl_name.data == NULL) {
+            return NGX_CONF_ERROR;
+        }
+
+        ngx_memcpy(target->ssl_name.data, u->host.data, u->host.len);
+        target->ssl_name.data[u->host.len] = '\0';
+        target->ssl_name.len = u->host.len;
+    }
+
+#endif
 
     value += 2;
     for (i = 2; i < cf->args->nelts; ++i, ++value) {
@@ -1908,6 +1919,8 @@ ngx_rtmp_relay_push_pull(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             NGX_RTMP_RELAY_FLAG_PAR("ssl_server_name",  ssl_server_name);
             NGX_RTMP_RELAY_FLAG_PAR("ssl_verify",       ssl_verify);
         }
+    
+#undef NGX_RTMP_RELAY_FLAG_PAR
 
 #endif
 
@@ -2210,59 +2223,6 @@ ngx_rtmp_ssl_name(ngx_rtmp_session_t *rs, ngx_rtmp_relay_target_t *target)
 #endif
 
     return NGX_OK;
-}
-
-ngx_int_t
-ngx_rtmp_relay_configure_ssl_name(ngx_pool_t *pool, ngx_str_t url,
-        ngx_str_t *ssl_name)
-{
-    u_char *host, *port, *last, *uri, *args, *p;
-
-    if (url.len == 0) {
-        goto no_ssl_name;
-    }
-
-    host = url.data;
-    last = host + url.len;
-
-    if (url.data[0] == '[') {
-        /* found a literal IPv6 address */
-        goto no_ssl_name;
-    }
-
-    port = ngx_strlchr(host, last, ':');
-    uri = ngx_strlchr(host, last, '/');
-    args = ngx_strlchr(host, last, '?');
-
-    /* find the end of the hostname part of the url */
-    if (port) {
-        last = port;
-    } else if (uri) {
-        last = uri;
-    } else if (args) {
-        last = args;
-    }
-
-    if (ngx_inet_addr(host, last - host) != INADDR_NONE) {
-        goto no_ssl_name;
-    }
-
-    p = ngx_pnalloc(pool, (last - host) + 1);
-    if (p == NULL) {
-        goto err;
-    }
-
-    (void) ngx_cpystrn(p, host, (last - host) + 1);
-
-    ssl_name->len  = last - host;
-    ssl_name->data = p;
-    return NGX_OK;
-
-no_ssl_name:
-    return NGX_OK;
-
-err:
-    return NGX_ERROR;
 }
 
 

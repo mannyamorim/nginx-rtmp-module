@@ -1450,9 +1450,6 @@ ngx_rtmp_notify_resolve_handler(ngx_resolver_ctx_t *ctx)
 
     ngx_resolve_name_done(ctx);
 
-    ngx_rtmp_relay_configure_ssl_name(s->connection->pool,
-                                      target->url.url,
-                                      &target->ssl_name);
     ngx_rtmp_relay_push(s, &push_pull_ctx->name, target);
     return;
 
@@ -1629,6 +1626,20 @@ ngx_rtmp_notify_publish_handle(ngx_rtmp_session_t *s,
                       "notify: push failed '%V'", &local_name);
         return NGX_ERROR;
     }
+
+#if (NGX_RTMP_SSL)
+    if (target->is_rtmps) {
+        /* ssl_name must be NULL terminated, so duplicate it */
+        target->ssl_name.data = ngx_pnalloc(s->connection->pool, u->host.len + 1);
+        if (target->ssl_name.data == NULL) {
+            return NGX_ERROR;
+        }
+
+        ngx_memcpy(target->ssl_name.data, u->host.data, u->host.len);
+        target->ssl_name.data[u->host.len] = '\0';
+        target->ssl_name.len = u->host.len;
+    }
+#endif
 
     if (u->naddrs == 0) {
         /* need to resolve the name */
