@@ -491,6 +491,20 @@ ngx_rtmp_relay_create_connection(ngx_rtmp_conf_ctx_t *cctx, ngx_str_t* name,
         goto clear;
     }
 
+#if (NGX_RTMP_SSL)
+
+    if (target->is_rtmps) {
+        ngx_str_set(&rctx->proto, "rtmps://");
+    } else {
+        ngx_str_set(&rctx->proto, "rtmp://");
+    }
+
+#else
+
+    ngx_str_set(&rctx->proto, "rtmp://");
+
+#endif 
+
     rctx->tag = target->tag;
     rctx->data = target->data;
 
@@ -695,6 +709,8 @@ ngx_rtmp_relay_create_local_ctx(ngx_rtmp_session_t *s, ngx_str_t *name,
     {
         return NULL;
     }
+
+    ngx_str_set(&ctx->proto, "rtmp://");
 
     return ctx;
 }
@@ -1018,14 +1034,14 @@ ngx_rtmp_relay_send_connect(ngx_rtmp_session_t *s)
         out_cmd[1].data = ctx->tc_url.data;
         out_cmd[1].len  = ctx->tc_url.len;
     } else {
-        len = sizeof("rtmp://") - 1 + ctx->url.len +
+        len = ctx->proto.len + ctx->url.len +
             sizeof("/") - 1 + ctx->app.len;
         p = ngx_palloc(s->connection->pool, len);
         if (p == NULL) {
             return NGX_ERROR;
         }
         out_cmd[1].data = p;
-        p = ngx_cpymem(p, "rtmp://", sizeof("rtmp://") - 1);
+        p = ngx_cpymem(p, ctx->proto.data, ctx->proto.len);
 
         url_len = ctx->url.len;
         url_end = ngx_strlchr(ctx->url.data, ctx->url.data + ctx->url.len, '/');
