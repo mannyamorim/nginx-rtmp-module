@@ -10,6 +10,9 @@
 #include <nginx.h>
 #include "ngx_rtmp.h"
 
+#if (NGX_RTMP_SSL)
+#include "ngx_rtmp_ssl_module.h"
+#endif
 
 static void *ngx_rtmp_core_create_main_conf(ngx_conf_t *cf);
 static void *ngx_rtmp_core_create_srv_conf(ngx_conf_t *cf);
@@ -673,6 +676,21 @@ ngx_rtmp_core_listen(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                                "bind ipv6only is not supported "
                                "on this platform");
+            return NGX_CONF_ERROR;
+#endif
+        }
+
+        if (ngx_strcmp(value[i].data, "ssl") == 0) {
+#if (NGX_RTMP_SSL)
+            ngx_rtmp_ssl_conf_t    *sslcf;
+
+            sslcf = ngx_rtmp_conf_get_module_srv_conf(cf, ngx_rtmp_ssl_module);
+            sslcf->listen = 1;
+            ls->ssl = 1;
+            continue;
+#else
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                               "the \"ssl\" parameter requires ssl support");
             return NGX_CONF_ERROR;
 #endif
         }
