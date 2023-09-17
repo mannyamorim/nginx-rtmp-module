@@ -1,4 +1,4 @@
-FROM nginx:1.22.1-alpine as builder
+FROM nginx:1.24.0-alpine as builder
 COPY . /modules/rtmp
 ENV module=rtmp
 
@@ -16,7 +16,7 @@ RUN set -ex \
     && echo "Building $module from user-supplied sources" \
     && /pkg-oss/build_module.sh -v $NGINX_VERSION -f -y -o /tmp/packages -n $module /modules/$module
 
-FROM nginx:1.22.1-alpine
+FROM nginx:1.24.0-alpine
 COPY --from=builder /tmp/packages /tmp/packages
 ENV module=rtmp
 RUN set -ex \
