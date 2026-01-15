@@ -179,12 +179,12 @@ ngx_rtmp_ping(ngx_event_t *pev)
     ngx_log_debug1(NGX_LOG_DEBUG_RTMP, s->connection->log, 0,
             "ping: schedule %Mms", cscf->ping_timeout);
 
+    s->ping_active = 1;
     if (ngx_rtmp_send_ping_request(s, (uint32_t)ngx_current_msec) != NGX_OK) {
         ngx_rtmp_finalize_session(s);
         return;
     }
 
-    s->ping_active = 1;
     ngx_add_timer(pev, cscf->ping_timeout);
 }
 
@@ -269,7 +269,10 @@ ngx_rtmp_recv(ngx_event_t *rev)
                 return;
             }
 
-            s->ping_reset = 1;
+            if (!s->ping_active) {
+                s->ping_reset = 1;
+            }
+
             ngx_rtmp_update_bandwidth(&ngx_rtmp_bw_in, n);
             b->last += n;
             s->in_bytes += n;
@@ -537,7 +540,9 @@ ngx_rtmp_send(ngx_event_t *wev)
         }
 
         s->out_bytes += n;
-        s->ping_reset = 1;
+        if (!s->ping_active) {
+            s->ping_reset = 1;
+        }
         ngx_rtmp_update_bandwidth(&ngx_rtmp_bw_out, n);
         s->out_bpos += n;
         if (s->out_bpos == s->out_chain->buf->last) {
