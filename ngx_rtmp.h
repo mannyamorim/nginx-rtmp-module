@@ -338,6 +338,8 @@ typedef struct ngx_rtmp_core_srv_conf_s {
 typedef struct {
     ngx_array_t             applications; /* ngx_rtmp_core_app_conf_t */
     ngx_str_t               name;
+    ngx_resolver_t         *resolver;
+    ngx_msec_t              resolver_timeout;
     void                  **app_conf;
 } ngx_rtmp_core_app_conf_t;
 
@@ -365,6 +367,7 @@ typedef struct {
 } ngx_rtmp_module_t;
 
 #define NGX_RTMP_MODULE                 0x504D5452     /* "RTMP" */
+#define NGX_RTMP_SSL                    NGX_OPENSSL
 
 #define NGX_RTMP_MAIN_CONF              0x02000000
 #define NGX_RTMP_SRV_CONF               0x04000000

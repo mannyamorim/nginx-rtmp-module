@@ -30,6 +30,17 @@ static ngx_rtmp_relay_ctx_t * ngx_rtmp_relay_create_connection(
        ngx_rtmp_conf_ctx_t *cctx, ngx_str_t* name,
        ngx_rtmp_relay_target_t *target);
 
+#if (NGX_RTMP_SSL)
+
+static void ngx_rtmp_ssl_init_connection(ngx_rtmp_session_t *rs,
+        ngx_rtmp_relay_target_t *target);
+static void ngx_rtmp_ssl_handshake_handler(ngx_connection_t *c);
+static void ngx_rtmp_ssl_handshake(ngx_rtmp_session_t *rs);
+static ngx_int_t ngx_rtmp_ssl_name(ngx_rtmp_session_t *rs,
+        ngx_rtmp_relay_target_t *target);
+
+#endif
+
 
 /*                _____
  * =push=        |     |---publish--->
@@ -43,21 +54,6 @@ static ngx_rtmp_relay_ctx_t * ngx_rtmp_relay_create_connection(
  * -----play---->|     | (src,relay)
  *     (next)     -----
  */
-
-
-typedef struct {
-    ngx_array_t                 pulls;         /* ngx_rtmp_relay_target_t * */
-    ngx_array_t                 pushes;        /* ngx_rtmp_relay_target_t * */
-    ngx_array_t                 static_pulls;  /* ngx_rtmp_relay_target_t * */
-    ngx_array_t                 static_events; /* ngx_event_t * */
-    ngx_log_t                  *log;
-    ngx_uint_t                  nbuckets;
-    ngx_msec_t                  buflen;
-    ngx_flag_t                  session_relay;
-    ngx_msec_t                  push_reconnect;
-    ngx_msec_t                  pull_reconnect;
-    ngx_rtmp_relay_ctx_t        **ctx;
-} ngx_rtmp_relay_app_conf_t;
 
 
 typedef struct {
@@ -77,6 +73,21 @@ typedef struct {
 
 /* default flashVer */
 #define NGX_RTMP_RELAY_FLASHVER                 "LNX.11,1,102,55"
+
+
+#if (NGX_RTMP_SSL)
+
+static ngx_conf_bitmask_t  ngx_rtmp_relay_ssl_protocols[] = {
+    { ngx_string("SSLv2"), NGX_SSL_SSLv2 },
+    { ngx_string("SSLv3"), NGX_SSL_SSLv3 },
+    { ngx_string("TLSv1"), NGX_SSL_TLSv1 },
+    { ngx_string("TLSv1.1"), NGX_SSL_TLSv1_1 },
+    { ngx_string("TLSv1.2"), NGX_SSL_TLSv1_2 },
+    { ngx_string("TLSv1.3"), NGX_SSL_TLSv1_3 },
+    { ngx_null_string, 0 }
+};
+
+#endif
 
 
 static ngx_command_t  ngx_rtmp_relay_commands[] = {
@@ -123,6 +134,58 @@ static ngx_command_t  ngx_rtmp_relay_commands[] = {
       offsetof(ngx_rtmp_relay_app_conf_t, session_relay),
       NULL },
 
+#if (NGX_RTMP_SSL)
+
+    { ngx_string("rtmp_relay_ssl_protocols"),
+      NGX_RTMP_MAIN_CONF|NGX_RTMP_SRV_CONF|NGX_RTMP_APP_CONF|NGX_CONF_1MORE,
+      ngx_conf_set_bitmask_slot,
+      NGX_RTMP_APP_CONF_OFFSET,
+      offsetof(ngx_rtmp_relay_app_conf_t, ssl_protocols),
+      &ngx_rtmp_relay_ssl_protocols },
+
+    { ngx_string("rtmp_relay_ssl_ciphers"),
+      NGX_RTMP_MAIN_CONF|NGX_RTMP_SRV_CONF|NGX_RTMP_APP_CONF|NGX_CONF_TAKE1,
+      ngx_conf_set_str_slot,
+      NGX_RTMP_APP_CONF_OFFSET,
+      offsetof(ngx_rtmp_relay_app_conf_t, ssl_ciphers),
+      NULL },
+
+    { ngx_string("rtmp_relay_ssl_server_name"),
+      NGX_RTMP_MAIN_CONF|NGX_RTMP_SRV_CONF|NGX_RTMP_APP_CONF|NGX_CONF_FLAG,
+      ngx_conf_set_flag_slot,
+      NGX_RTMP_APP_CONF_OFFSET,
+      offsetof(ngx_rtmp_relay_app_conf_t, ssl_server_name),
+      NULL },
+
+    { ngx_string("rtmp_relay_ssl_verify"),
+      NGX_RTMP_MAIN_CONF|NGX_RTMP_SRV_CONF|NGX_RTMP_APP_CONF|NGX_CONF_FLAG,
+      ngx_conf_set_flag_slot,
+      NGX_RTMP_APP_CONF_OFFSET,
+      offsetof(ngx_rtmp_relay_app_conf_t, ssl_verify),
+      NULL },
+
+    { ngx_string("rtmp_relay_ssl_verify_depth"),
+      NGX_RTMP_MAIN_CONF|NGX_RTMP_SRV_CONF|NGX_RTMP_APP_CONF|NGX_CONF_TAKE1,
+      ngx_conf_set_num_slot,
+      NGX_RTMP_APP_CONF_OFFSET,
+      offsetof(ngx_rtmp_relay_app_conf_t, ssl_verify_depth),
+      NULL },
+
+    { ngx_string("rtmp_relay_ssl_trusted_certificate"),
+      NGX_RTMP_MAIN_CONF|NGX_RTMP_SRV_CONF|NGX_RTMP_APP_CONF|NGX_CONF_TAKE1,
+      ngx_conf_set_str_slot,
+      NGX_RTMP_APP_CONF_OFFSET,
+      offsetof(ngx_rtmp_relay_app_conf_t, ssl_trusted_certificate),
+      NULL },
+
+    { ngx_string("rtmp_relay_ssl_crl"),
+      NGX_RTMP_MAIN_CONF|NGX_RTMP_SRV_CONF|NGX_RTMP_APP_CONF|NGX_CONF_TAKE1,
+      ngx_conf_set_str_slot,
+      NGX_RTMP_APP_CONF_OFFSET,
+      offsetof(ngx_rtmp_relay_app_conf_t, ssl_crl),
+      NULL },
+
+#endif
 
       ngx_null_command
 };
@@ -193,6 +256,23 @@ ngx_rtmp_relay_create_app_conf(ngx_conf_t *cf)
     racf->push_reconnect = NGX_CONF_UNSET_MSEC;
     racf->pull_reconnect = NGX_CONF_UNSET_MSEC;
 
+#if (NGX_RTMP_SSL)
+
+    /* 
+     * the following are automatically zeroed out by pcalloc
+     * 
+     * racf->ssl_protocols
+     * racf->ssl_ciphers
+     * racf->ssl_trusted_certificate
+     * racf->ssl_crl
+     */
+
+    racf->ssl_server_name = NGX_CONF_UNSET;
+    racf->ssl_verify = NGX_CONF_UNSET;
+    racf->ssl_verify_depth = NGX_CONF_UNSET_UINT;
+
+#endif
+
     return racf;
 }
 
@@ -212,6 +292,41 @@ ngx_rtmp_relay_merge_app_conf(ngx_conf_t *cf, void *parent, void *child)
             3000);
     ngx_conf_merge_msec_value(conf->pull_reconnect, prev->pull_reconnect,
             3000);
+
+#if (NGX_RTMP_SSL)
+
+    ngx_conf_merge_bitmask_value(conf->ssl_protocols, prev->ssl_protocols,
+                                 (NGX_CONF_BITMASK_SET|NGX_SSL_TLSv1
+                                  |NGX_SSL_TLSv1_1|NGX_SSL_TLSv1_2));
+    ngx_conf_merge_str_value(conf->ssl_ciphers, prev->ssl_ciphers, "DEFAULT");
+    ngx_conf_merge_value(conf->ssl_server_name, prev->ssl_server_name, 1);
+    ngx_conf_merge_value(conf->ssl_verify, prev->ssl_verify, 1);
+    ngx_conf_merge_uint_value(conf->ssl_verify_depth, prev->ssl_verify_depth,
+             1);
+    ngx_conf_merge_str_value(conf->ssl_trusted_certificate,
+            prev->ssl_trusted_certificate, "");
+    ngx_conf_merge_str_value(conf->ssl_crl, prev->ssl_crl, "");
+
+#define ngx_rtmp_configure_ssl_for_arr(arr)                                   \
+    {                                                                         \
+        ngx_uint_t                i;                                          \
+        ngx_rtmp_relay_target_t  *target;                                     \
+        for (i = 0; i < (arr).nelts; i++) {                                   \
+            target = *((ngx_rtmp_relay_target_t **)((arr).elts) + i);         \
+            if (ngx_rtmp_relay_configure_ssl(cf, conf, target)                \
+                    != NGX_OK) {                                              \
+                return NGX_CONF_ERROR;                                        \
+            }                                                                 \
+        }                                                                     \
+    }
+
+    ngx_rtmp_configure_ssl_for_arr(conf->pulls);
+    ngx_rtmp_configure_ssl_for_arr(conf->pushes);
+    ngx_rtmp_configure_ssl_for_arr(conf->static_pulls);
+
+#undef ngx_rtmp_configure_ssl_for_arr
+
+#endif
 
     return NGX_CONF_OK;
 }
@@ -397,6 +512,14 @@ ngx_rtmp_relay_create_connection(ngx_rtmp_conf_ctx_t *cctx, ngx_str_t* name,
 
 #undef NGX_RTMP_RELAY_STR_COPY
 
+#if (NGX_RTMP_SSL)
+
+    rctx->ssl_name         = target->ssl_name;
+    rctx->ssl_server_name  = target->ssl_server_name;
+    rctx->ssl_verify       = target->ssl_verify;
+
+#endif
+
     if (rctx->app.len == 0 || rctx->play_path.len == 0) {
         /* parse uri */
         uri = &target->url.uri;
@@ -505,6 +628,14 @@ ngx_rtmp_relay_create_connection(ngx_rtmp_conf_ctx_t *cctx, ngx_str_t* name,
 
 #if (NGX_STAT_STUB)
     (void) ngx_atomic_fetch_add(ngx_stat_active, 1);
+#endif
+
+#if (NGX_RTMP_SSL)
+    if (target->is_rtmps) {
+        c->data = rs;
+        ngx_rtmp_ssl_init_connection(rs, target);
+        return rctx;
+    }
 #endif
 
     ngx_rtmp_client_handshake(rs, 1);
@@ -676,6 +807,10 @@ ngx_rtmp_relay_publish(ngx_rtmp_session_t *s, ngx_rtmp_publish_t *v)
 
     name.len = ngx_strlen(v->name);
     name.data = v->name;
+
+    if (ctx == NULL) {
+        ctx = ngx_rtmp_relay_create_local_ctx(s, &name, NULL);
+    }
 
     t = racf->pushes.elts;
     for (n = 0; n < racf->pushes.nelts; ++n, ++t) {
@@ -1677,6 +1812,21 @@ ngx_rtmp_relay_push_pull(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         u->url.len  -= 7;
     }
 
+#if (NGX_RTMP_SSL)
+
+    if (ngx_strncasecmp(u->url.data, (u_char *) "rtmps://", 8) == 0) {
+        u->url.data += 8;
+        u->url.len  -= 8;
+
+        u->default_port = 443;
+
+        target->is_rtmps = 1;
+        target->ssl_server_name = NGX_CONF_UNSET;
+        target->ssl_verify = NGX_CONF_UNSET;
+    }
+
+#endif
+
     if (ngx_parse_url(cf->pool, u) != NGX_OK) {
         if (u->err) {
             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
@@ -1684,6 +1834,22 @@ ngx_rtmp_relay_push_pull(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         }
         return NGX_CONF_ERROR;
     }
+
+#if (NGX_RTMP_SSL)
+
+    if (target->is_rtmps) {
+        /* ssl_name must be NULL terminated, so duplicate it */
+        target->ssl_name.data = ngx_pnalloc(cf->pool, u->host.len + 1);
+        if (target->ssl_name.data == NULL) {
+            return NGX_CONF_ERROR;
+        }
+
+        ngx_memcpy(target->ssl_name.data, u->host.data, u->host.len);
+        target->ssl_name.data[u->host.len] = '\0';
+        target->ssl_name.len = u->host.len;
+    }
+
+#endif
 
     value += 2;
     for (i = 2; i < cf->args->nelts; ++i, ++value) {
@@ -1727,6 +1893,36 @@ ngx_rtmp_relay_push_pull(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         NGX_RTMP_RELAY_NUM_PAR("live",        live);
         NGX_RTMP_RELAY_NUM_PAR("start",       start);
         NGX_RTMP_RELAY_NUM_PAR("stop",        stop);
+
+#if (NGX_RTMP_SSL)
+
+#define NGX_RTMP_RELAY_FLAG_PAR(name, var)                                    \
+        if (n.len == sizeof(name) - 1                                         \
+            && ngx_strncasecmp(n.data, (u_char *) name, n.len) == 0)          \
+        {                                                                     \
+            if (ngx_strncasecmp(v.data, (u_char *) "on", v.len) == 0) {       \
+                target->var = 1;                                              \
+            } else if (ngx_strncasecmp(v.data, (u_char *) "off", v.len)       \
+                    == 0)                                                     \
+            {                                                                 \
+                target->var = 0;                                              \
+            } else {                                                          \
+                ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,                      \
+                            "invalid value \"%V\" in \"%V\" directive, "      \
+                            "it must be \"on\" or \"off\"", &v, &n);          \
+                return NGX_CONF_ERROR;                                        \
+            }                                                                 \
+            continue;                                                         \
+        }
+
+        if (target->is_rtmps) {
+            NGX_RTMP_RELAY_FLAG_PAR("ssl_server_name",  ssl_server_name);
+            NGX_RTMP_RELAY_FLAG_PAR("ssl_verify",       ssl_verify);
+        }
+    
+#undef NGX_RTMP_RELAY_FLAG_PAR
+
+#endif
 
 #undef NGX_RTMP_RELAY_STR_PAR
 #undef NGX_RTMP_RELAY_NUM_PAR
@@ -1897,3 +2093,197 @@ ngx_rtmp_relay_postconfiguration(ngx_conf_t *cf)
 
     return NGX_OK;
 }
+
+
+#if (NGX_RTMP_SSL)
+
+static void
+ngx_rtmp_ssl_init_connection(ngx_rtmp_session_t *rs,
+        ngx_rtmp_relay_target_t *target)
+{
+    ngx_int_t                  rc;
+    ngx_connection_t           *c;
+
+    c = rs->connection;
+
+    ngx_log_debug0(NGX_LOG_DEBUG_RTMP, c->log, 0,
+                   "relay: initialize SSL connection");
+
+    if (ngx_ssl_create_connection(target->ssl, c,
+                                  NGX_SSL_BUFFER|NGX_SSL_CLIENT)
+        != NGX_OK)
+    {
+        ngx_rtmp_finalize_session(rs);
+        return;
+    }
+
+    c->sendfile = 0;
+
+    if (target->ssl_server_name && ngx_rtmp_ssl_name(rs, target) != NGX_OK) {
+        ngx_rtmp_finalize_session(rs);
+        return;
+    }
+
+    rc = ngx_ssl_handshake(c);
+
+    if (rc == NGX_AGAIN) {
+
+        if (!c->write->timer_set) {
+            ngx_add_timer(c->write, rs->timeout);
+        }
+
+        c->ssl->handler = ngx_rtmp_ssl_handshake_handler;
+        return;
+    }
+
+    ngx_rtmp_ssl_handshake(rs);
+}
+
+
+static void
+ngx_rtmp_ssl_handshake_handler(ngx_connection_t *c)
+{
+    ngx_rtmp_session_t   *rs;
+ 
+    rs = c->data;
+    ngx_rtmp_ssl_handshake(rs);
+}
+
+
+static void
+ngx_rtmp_ssl_handshake(ngx_rtmp_session_t *rs)
+{
+    ngx_connection_t     *c;
+    ngx_rtmp_relay_ctx_t *rctx;
+    long                  rc;
+
+    c = rs->connection;
+    rctx = ngx_rtmp_get_module_ctx(rs, ngx_rtmp_relay_module);
+
+    ngx_log_debug0(NGX_LOG_DEBUG_RTMP, c->log, 0, "relay: SSL handshaking");
+
+    if (c->ssl->handshaked) {
+        if (rctx->ssl_verify && rctx->ssl_name.len != 0) {
+            rc = SSL_get_verify_result(c->ssl->connection);
+
+            if (rc != X509_V_OK) {
+                ngx_log_error(NGX_LOG_ERR, c->log, 0,
+                              "relay: SSL certificate verify error: (%l:%s)",
+                              rc, X509_verify_cert_error_string(rc));
+                goto err;
+            }
+
+            if (ngx_ssl_check_host(c, &rctx->ssl_name) != NGX_OK) {
+                ngx_log_error(NGX_LOG_ERR, c->log, 0,
+                              "relay: SSL certificate does not match \"%V\"",
+                              &rctx->ssl_name);
+                goto err;
+            }
+        }
+
+        ngx_rtmp_client_handshake(rs, 1);
+        return;
+    }
+
+    if (c->write->timedout) {
+        goto err;
+    }
+
+err:
+    ngx_rtmp_finalize_session(rs);
+}
+
+
+static ngx_int_t
+ngx_rtmp_ssl_name(ngx_rtmp_session_t *rs, ngx_rtmp_relay_target_t *target)
+{
+
+#ifdef SSL_CTRL_SET_TLSEXT_HOSTNAME
+
+    ngx_connection_t *c;
+
+    c = rs->connection;
+
+    if (target->ssl_name.len == 0) {
+        return NGX_OK;
+    }
+
+    ngx_log_debug1(NGX_LOG_DEBUG_RTMP, c->log, 0,
+                   "relay: SSL server name: \"%V\"", &target->ssl_name);
+
+    if (SSL_set_tlsext_host_name(c->ssl->connection, target->ssl_name.data)
+            == 0)
+    {
+        ngx_ssl_error(NGX_LOG_ERR, c->log, 0,
+                      "SSL_set_tlsext_host_name(\"%V\") failed",
+                      &target->ssl_name);
+        return NGX_ERROR;
+    }
+
+#endif
+
+    return NGX_OK;
+}
+
+
+ngx_int_t
+ngx_rtmp_relay_configure_ssl(ngx_conf_t *cf, ngx_rtmp_relay_app_conf_t *racf,
+        ngx_rtmp_relay_target_t *target)
+{
+    ngx_pool_cleanup_t  *cln;
+
+    if (target->is_rtmps) {
+        target->ssl = ngx_pcalloc(cf->pool, sizeof(ngx_ssl_t));
+        if (target->ssl == NULL) {
+            return NGX_ERROR;
+        }
+
+        target->ssl->log = cf->log;
+
+        if (ngx_ssl_create(target->ssl, racf->ssl_protocols, NULL) != NGX_OK) {
+            return NGX_ERROR;
+        }
+
+        cln = ngx_pool_cleanup_add(cf->pool, 0);
+        if (cln == NULL) {
+            ngx_ssl_cleanup_ctx(target->ssl);
+            return NGX_ERROR;
+        }
+
+        cln->handler = ngx_ssl_cleanup_ctx;
+        cln->data = target->ssl;
+
+        if (ngx_ssl_ciphers(cf, target->ssl, &racf->ssl_ciphers, 0)
+                != NGX_OK) {
+            return NGX_ERROR;
+        }
+
+        ngx_conf_merge_value(target->ssl_server_name,
+                racf->ssl_server_name, 0);
+        ngx_conf_merge_value(target->ssl_verify, racf->ssl_verify, 0);
+
+        if (target->ssl_verify) {
+            if (racf->ssl_trusted_certificate.len == 0) {
+                ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
+                        "relay: no rtmp_relay_ssl_trusted_certificate for rtmp_relay_ssl_verify");
+                return NGX_ERROR;
+            }
+
+            if (ngx_ssl_trusted_certificate(cf, target->ssl,
+                                            &racf->ssl_trusted_certificate,
+                                            racf->ssl_verify_depth)
+                != NGX_OK)
+            {
+                return NGX_ERROR;
+            }
+
+            if (ngx_ssl_crl(cf, target->ssl, &racf->ssl_crl) != NGX_OK) {
+                return NGX_ERROR;
+            }
+        }
+    }
+
+    return NGX_OK;
+}
+
+#endif

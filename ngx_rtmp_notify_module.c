@@ -41,6 +41,8 @@ static char *ngx_rtmp_notify_merge_srv_conf(ngx_conf_t *cf, void *parent,
        void *child);
 static ngx_int_t ngx_rtmp_notify_done(ngx_rtmp_session_t *s, char *cbname,
        ngx_uint_t url_idx);
+static void ngx_rtmp_notify_reset_relay_target(
+       ngx_rtmp_relay_target_t *target);
 
 
 ngx_str_t   ngx_rtmp_notify_urlencoded =
@@ -80,6 +82,7 @@ typedef struct {
     ngx_msec_t                                  update_timeout;
     ngx_flag_t                                  update_strict;
     ngx_flag_t                                  relay_redirect;
+    ngx_rtmp_relay_target_t                    *publish_relay_target;
 } ngx_rtmp_notify_app_conf_t;
 
 
@@ -103,6 +106,13 @@ typedef struct {
     u_char                                     *cbname;
     ngx_uint_t                                  url_idx;
 } ngx_rtmp_notify_done_t;
+
+
+typedef struct {
+    ngx_rtmp_session_t                         *session;
+    ngx_str_t                                   name;
+    ngx_rtmp_relay_target_t                    *target;
+} ngx_rtmp_notify_push_pull_ctx_t;
 
 
 static ngx_command_t  ngx_rtmp_notify_commands[] = {
@@ -283,6 +293,7 @@ ngx_rtmp_notify_merge_app_conf(ngx_conf_t *cf, void *parent, void *child)
 {
     ngx_rtmp_notify_app_conf_t *prev = parent;
     ngx_rtmp_notify_app_conf_t *conf = child;
+    ngx_rtmp_relay_app_conf_t  *racf;
     ngx_uint_t                  n;
 
     for (n = 0; n < NGX_RTMP_NOTIFY_APP_MAX; ++n) {
@@ -295,6 +306,29 @@ ngx_rtmp_notify_merge_app_conf(ngx_conf_t *cf, void *parent, void *child)
     if (conf->active) {
         prev->active = 1;
     }
+
+    racf = ngx_rtmp_conf_get_module_app_conf(cf, ngx_rtmp_relay_module);
+
+    if (conf->url[NGX_RTMP_NOTIFY_PUBLISH]) {
+        conf->publish_relay_target =
+            ngx_pcalloc(cf->pool, sizeof(*(conf->publish_relay_target)));
+        if (conf->publish_relay_target == NULL) {
+            return NGX_CONF_ERROR;
+        }
+
+#if (NGX_RTMP_SSL)
+        conf->publish_relay_target->is_rtmps = 1;
+        conf->publish_relay_target->ssl_server_name = NGX_CONF_UNSET;
+        conf->publish_relay_target->ssl_verify = NGX_CONF_UNSET;
+
+        if (ngx_rtmp_relay_configure_ssl(cf, racf, conf->publish_relay_target)
+            != NGX_OK)
+        {
+            return NGX_CONF_ERROR;
+        }
+#endif
+    }
+
 
     ngx_conf_merge_uint_value(conf->method, prev->method,
                               NGX_RTMP_NETCALL_HTTP_POST);
@@ -1312,6 +1346,120 @@ ngx_rtmp_notify_set_name(u_char *dst, size_t dst_len, u_char *src,
 }
 
 
+static void
+ngx_rtmp_notify_reset_relay_target(ngx_rtmp_relay_target_t *target)
+{
+#if (NGX_RTMP_SSL)
+    ngx_ssl_t                      *ssl;
+    ngx_flag_t                      ssl_server_name;
+    ngx_flag_t                      ssl_verify;
+
+    ssl = target->ssl;
+    ssl_server_name = target->ssl_server_name;
+    ssl_verify = target->ssl_verify;
+#endif
+
+    ngx_memzero(target, sizeof(*target));
+
+#if (NGX_RTMP_SSL)
+    target->ssl = ssl;
+    target->ssl_server_name = ssl_server_name;
+    target->ssl_verify = ssl_verify;
+#endif
+}
+
+
+static void
+ngx_rtmp_notify_resolve_handler(ngx_resolver_ctx_t *ctx)
+{
+    ngx_rtmp_notify_push_pull_ctx_t            *push_pull_ctx;
+    ngx_rtmp_session_t                         *s;
+    ngx_rtmp_relay_target_t                    *target;
+    ngx_uint_t                                  naddrs, i;
+    ngx_resolver_addr_t                        *addrs;
+    struct sockaddr                            *sa;
+    u_char                                     *p;
+    size_t                                      len;
+    
+
+    push_pull_ctx = ctx->data;
+    s = push_pull_ctx->session;
+    target = push_pull_ctx->target;
+
+    ngx_log_debug0(NGX_LOG_DEBUG_STREAM, s->connection->log, 0,
+                   "rtmp notify resolve");
+
+    if (ctx->state) {
+        ngx_log_error(NGX_LOG_ERR, s->connection->log, 0,
+                      "%V could not be resolved (%i: %s)",
+                      &ctx->name, ctx->state,
+                      ngx_resolver_strerror(ctx->state));
+        ngx_rtmp_finalize_session(s);
+        return;
+    }
+
+    naddrs = ctx->naddrs;
+    addrs = ctx->addrs;
+
+#if (NGX_DEBUG)
+    {
+    u_char      text[NGX_SOCKADDR_STRLEN];
+    ngx_str_t   addr;
+    ngx_uint_t  i;
+
+    addr.data = text;
+
+    for (i = 0; i < ctx->naddrs; i++) {
+        addr.len = ngx_sock_ntop(addrs[i].sockaddr, addrs[i].socklen,
+                                 text, NGX_SOCKADDR_STRLEN, 0);
+
+        ngx_log_debug1(NGX_LOG_DEBUG_STREAM, s->connection->log, 0,
+                       "name was resolved to %V", &addr);
+    }
+    }
+#endif
+
+    target->url.naddrs = naddrs;
+    target->url.addrs = ngx_pcalloc(s->connection->pool,
+                                    sizeof(ngx_addr_t) * naddrs);
+    if (target->url.addrs == NULL) {
+        goto error;
+    }
+
+    for (i = 0; i < naddrs; i++) {
+        sa = ngx_pcalloc(s->connection->pool, addrs[i].socklen);
+        if (sa == NULL) {
+            goto error;
+        }
+        ngx_memcpy(sa, addrs[i].sockaddr, addrs[i].socklen);
+
+        ngx_inet_set_port(sa, target->url.port);
+        target->url.addrs[i].sockaddr = sa;
+        target->url.addrs[i].socklen = addrs[i].socklen;
+
+        p = ngx_pnalloc(s->connection->pool, NGX_SOCKADDR_STRLEN);
+        if (p == NULL) {
+            goto error;
+        }
+
+        len = ngx_sock_ntop(sa, addrs[i].socklen, p, NGX_SOCKADDR_STRLEN, 1);
+
+        target->url.addrs[i].name.len = len;
+        target->url.addrs[i].name.data = p;
+    }
+
+    ngx_resolve_name_done(ctx);
+
+    ngx_rtmp_relay_push(s, &push_pull_ctx->name, target);
+    return;
+
+error:
+    ngx_log_error(NGX_LOG_ERR, s->connection->log, 0,
+                  "error processing resolver response");
+    ngx_rtmp_finalize_session(s);
+}
+
+
 static ngx_int_t
 ngx_rtmp_notify_publish_handle(ngx_rtmp_session_t *s,
         void *arg, ngx_chain_t *in)
@@ -1319,9 +1467,12 @@ ngx_rtmp_notify_publish_handle(ngx_rtmp_session_t *s,
     ngx_rtmp_publish_t         *v = arg;
     ngx_int_t                   rc, send;
     ngx_str_t                   local_name;
-    ngx_rtmp_relay_target_t     target;
+    ngx_rtmp_relay_target_t    *target;
     ngx_url_t                  *u;
+    ngx_rtmp_core_app_conf_t   *cacf;
     ngx_rtmp_notify_app_conf_t *nacf;
+    ngx_resolver_ctx_t         *ctx, temp;
+    ngx_rtmp_notify_push_pull_ctx_t *push_pull_ctx;
     u_char                      name[NGX_RTMP_MAX_NAME];
 
     static ngx_str_t    location = ngx_string("location");
@@ -1370,7 +1521,12 @@ ngx_rtmp_notify_publish_handle(ngx_rtmp_session_t *s,
         goto next;
     }
 
-    if (ngx_strncasecmp(name, (u_char *) "rtmp://", 7)) {
+    if ((ngx_strncasecmp(name, (u_char *) "rtmp://", 7) != 0)
+#if (NGX_RTMP_SSL)
+        && (ngx_strncasecmp(name, (u_char *) "rtmps://", 8) != 0)
+#endif
+    )
+    {
         *ngx_cpymem(v->name, name, rc) = 0;
         ngx_log_error(NGX_LOG_INFO, s->connection->log, 0,
                       "notify: publish redirect to '%s'", v->name);
@@ -1379,6 +1535,7 @@ ngx_rtmp_notify_publish_handle(ngx_rtmp_session_t *s,
 
     /* push */
 
+    cacf = ngx_rtmp_get_module_app_conf(s, ngx_rtmp_core_module);
     nacf = ngx_rtmp_get_module_app_conf(s, ngx_rtmp_notify_module);
 
     if (nacf->send_redirect) {
@@ -1434,15 +1591,35 @@ ngx_rtmp_notify_publish_handle(ngx_rtmp_session_t *s,
     local_name.data = v->name;
     local_name.len = ngx_strlen(v->name);
 
-    ngx_memzero(&target, sizeof(target));
+    target = nacf->publish_relay_target;
 
-    u = &target.url;
-    u->url = local_name;
-    u->url.data = name + 7;
-    u->url.len = rc - 7;
-    u->default_port = 1935;
+    ngx_rtmp_notify_reset_relay_target(target);
+
+    u = &target->url;
     u->uri_part = 1;
     u->no_resolve = 1; /* want ip here */
+
+#if (NGX_RTMP_SSL)
+    if (ngx_strncasecmp(name, (u_char *) "rtmps://", 8) == 0) {
+        u->url.data = name + 8;
+        u->url.len = rc - 8;
+        u->default_port = 443;
+
+        target->is_rtmps = 1;
+    } else
+#endif
+    {
+        u->url.data = name + 7;
+        u->url.len = rc - 7;
+        u->default_port = 1935;
+
+        target->is_rtmps = 0;
+    }
+
+    u->url.data = ngx_pstrdup(s->connection->pool, &u->url);
+    if (u->url.data == NULL) {
+        return NGX_ERROR;
+    }
 
     if (ngx_parse_url(s->connection->pool, u) != NGX_OK) {
         ngx_log_error(NGX_LOG_INFO, s->connection->log, 0,
@@ -1450,7 +1627,61 @@ ngx_rtmp_notify_publish_handle(ngx_rtmp_session_t *s,
         return NGX_ERROR;
     }
 
-    ngx_rtmp_relay_push(s, &local_name, &target);
+#if (NGX_RTMP_SSL)
+    if (target->is_rtmps) {
+        /* ssl_name must be NULL terminated, so duplicate it */
+        target->ssl_name.data = ngx_pnalloc(s->connection->pool, u->host.len + 1);
+        if (target->ssl_name.data == NULL) {
+            return NGX_ERROR;
+        }
+
+        ngx_memcpy(target->ssl_name.data, u->host.data, u->host.len);
+        target->ssl_name.data[u->host.len] = '\0';
+        target->ssl_name.len = u->host.len;
+    }
+#endif
+
+    if (u->naddrs == 0) {
+        /* need to resolve the name */
+        temp.name = u->host;
+        ctx = ngx_resolve_start(cacf->resolver, &temp);
+        if (ctx == NULL) {
+            return NGX_ERROR;
+        }
+
+        if (ctx == NGX_NO_RESOLVER) {
+            ngx_log_error(NGX_LOG_ERR, s->connection->log, 0,
+                            "no resolver defined to resolve %V", &u->host);
+            return NGX_ERROR;
+        }
+
+        push_pull_ctx = ngx_pcalloc(s->connection->pool,
+                                    sizeof(*push_pull_ctx));
+        if (push_pull_ctx == NULL) {
+            return NGX_ERROR;
+        }
+
+        push_pull_ctx->session = s;
+        push_pull_ctx->name.data = ngx_pstrdup(s->connection->pool,
+                                               &local_name);
+        push_pull_ctx->name.len = local_name.len;
+        push_pull_ctx->target = target;
+
+        if (push_pull_ctx->name.data == NULL) {
+            return NGX_ERROR;
+        }
+
+        ctx->name = u->host;
+        ctx->handler = ngx_rtmp_notify_resolve_handler;
+        ctx->data = push_pull_ctx;
+        ctx->timeout = cacf->resolver_timeout;
+
+        if (ngx_resolve_name(ctx) != NGX_OK) {
+            return NGX_ERROR;
+        }
+    } else {
+        ngx_rtmp_relay_push(s, &local_name, target);
+    }
 
 next:
 
