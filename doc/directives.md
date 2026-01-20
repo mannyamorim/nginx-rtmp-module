@@ -135,6 +135,27 @@ Table of Contents
     * [rtmp_socket_dir](#rtmp_socket_dir)
 * [Control](#control)
     * [rtmp_control](#rtmp_control)
+* [SSL](#ssl)
+    * [ssl_handshake_timeout](#ssl_handshake_timeout)
+    * [ssl_certificate](#ssl_certificate)
+    * [ssl_certificate_key](#ssl_certificate_key)
+    * [ssl_password_file](#ssl_password_file)
+    * [ssl_dhparam](#ssl_dhparam)
+    * [ssl_ecdh_curve](#ssl_ecdh_curve)
+    * [ssl_protocols](#ssl_protocols)
+    * [ssl_ciphers](#ssl_ciphers)
+    * [ssl_verify_client](#ssl_verify_client)
+    * [ssl_verify_depth](#ssl_verify_depth)
+    * [ssl_client_certificate](#ssl_client_certificate)
+    * [ssl_trusted_certificate](#ssl_trusted_certificate)
+    * [ssl_prefer_server_ciphers](#ssl_prefer_server_ciphers)
+    * [ssl_session_cache](#ssl_session_cache)
+    * [ssl_session_tickets](#ssl_session_tickets)
+    * [ssl_session_ticket_key](#ssl_session_ticket_key)
+    * [ssl_session_timeout](#ssl_session_timeout)
+    * [ssl_crl](#ssl_crl)
+    * [ssl_conf_command](#ssl_conf_command)
+    * [ssl_alpn](#ssl_alpn)
 
 ## Core
 #### rtmp
@@ -1896,3 +1917,185 @@ http {
 ```
 
 [More details about control module](control_modul.md)
+
+## SSL
+
+#### ssl_handshake_timeout
+Syntax: `ssl_handshake_timeout time;`  
+Context: rtmp, server  
+
+Specifies a timeout for the SSL handshake to complete. 
+
+#### ssl_certificate
+Syntax: `ssl_certificate file;`  
+Context: rtmp, server  
+
+Specifies a `file` with the certificate in the PEM format for the given virtual server. If intermediate certificates should be specified in addition to a primary certificate, they should be specified in the same file in the following order: the primary certificate comes first, then the intermediate certificates. A secret key in the PEM format may be placed in the same file.
+
+#### ssl_certificate_key
+Syntax: `ssl_certificate_key file;`  
+Context: rtmp, server  
+
+Specifies a `file` with the secret key in the PEM format for the given virtual server.
+
+#### ssl_password_file
+Syntax:	`ssl_password_file file;`  
+Context: rtmp, server  
+
+Specifies a `file` with passphrases for secret keys where each passphrase is specified on a separate line. Passphrases are tried in turn when loading the key. 
+
+#### ssl_dhparam
+Syntax: `ssl_dhparam file;`  
+Context: rtmp, server  
+
+Specifies a `file` with DH parameters for DHE ciphers.
+
+By default no parameters are set, and therefore DHE ciphers will not be used.
+
+#### ssl_ecdh_curve
+Syntax: `ssl_ecdh_curve curve;`  
+Context: rtmp, server  
+
+Specifies a `curve` for ECDHE ciphers.
+
+#### ssl_protocols
+Syntax: `ssl_protocols [SSLv2] [SSLv3] [TLSv1] [TLSv1.1] [TLSv1.2] [TLSv1.3];`  
+Context: rtmp, server  
+
+Enables the specified protocols.
+
+#### ssl_ciphers
+Syntax: `ssl_ciphers ciphers;`  
+Context: rtmp, server  
+
+Specifies the enabled ciphers. The ciphers are specified in the format understood by the OpenSSL library, for example:
+
+```
+ssl_ciphers ALL:!aNULL:!EXPORT56:RC4+RSA:+HIGH:+MEDIUM:+LOW:+SSLv2:+EXP;
+```
+
+The full list can be viewed using the “openssl ciphers” command.
+
+#### ssl_verify_client
+Syntax: `ssl_verify_client on | off | optional | optional_no_ca;`  
+Context: rtmp, server  
+
+Enables verification of client certificates. If an error has occurred during the client certificate verification or a client has not presented the required certificate, the connection is closed.
+
+The `optional` parameter requests the client certificate and verifies it if the certificate is present.
+
+The `optional_no_ca` parameter requests the client certificate but does not require it to be signed by a trusted CA certificate. This is intended for the use in cases when a service that is external to nginx performs the actual certificate verification. The contents of the certificate is accessible through the $ssl_client_cert variable.
+
+#### ssl_verify_depth
+Syntax: `ssl_verify_depth number;`  
+Context: rtmp, server  
+
+Sets the verification depth in the client certificates chain.
+
+#### ssl_client_certificate
+Syntax: `ssl_client_certificate file;`  
+Context: rtmp, server  
+
+Specifies a file with trusted CA certificates in the PEM format used to verify client certificates. The list of certificates will be sent to clients. If this is not desired, the ssl_trusted_certificate directive can be used.
+
+#### ssl_trusted_certificate
+Syntax: `ssl_trusted_certificate file;`  
+Context: rtmp, server  
+
+Specifies a file with trusted CA certificates in the PEM format used to verify client certificates. In contrast to the certificate set by ssl_client_certificate, the list of these certificates will not be sent to clients.
+
+#### ssl_prefer_server_ciphers
+Syntax: `ssl_prefer_server_ciphers on | off;`
+Context: rtmp, server
+
+Specifies that server ciphers should be preferred over client ciphers when the SSLv3 and TLS protocols are used.
+
+#### ssl_session_cache
+Syntax: `ssl_session_cache off | none | [builtin[:size]] [shared:name:size];`  
+Context: rtmp, server  
+
+Sets the types and sizes of caches that store session parameters. A cache can be of any of the following types:
+
+* `off` the use of a session cache is strictly prohibited: nginx explicitly tells a client that sessions may not be reused.  
+* `none` the use of a session cache is gently disallowed: nginx tells a client that sessions may be reused, but does not actually store session parameters in the cache.  
+* `builtin` a cache built in OpenSSL; used by one worker process only. The cache size is specified in sessions. If size is not given, it is equal to 20480 sessions. Use of the built-in cache can cause memory fragmentation.  
+* `shared` a cache shared between all worker processes. The cache size is specified in bytes; one megabyte can store about 4000 sessions. Each shared cache should have an arbitrary name. A cache with the same name can be used in several virtual servers. It is also used to automatically generate, store, and periodically rotate TLS session ticket keys (1.23.2) unless configured explicitly using the ssl_session_ticket_key directive.  
+
+Both cache types can be used simultaneously, for example:
+
+```ssl_session_cache builtin:1000 shared:SSL:10m;```
+
+but using only shared cache without the built-in cache should be more efficient. 
+
+#### ssl_session_tickets
+Syntax: `ssl_session_tickets on | off;`  
+Context: rtmp, server  
+
+Enables or disables session resumption through TLS session tickets.
+
+#### ssl_session_ticket_key
+Syntax:	`ssl_session_ticket_key file;`  
+Context: rtmp, server  
+
+Sets a `file` with the secret key used to encrypt and decrypt TLS session tickets. The directive is necessary if the same key has to be shared between multiple servers. By default, a randomly generated key is used.
+
+If several keys are specified, only the first key is used to encrypt TLS session tickets. This allows configuring key rotation, for example:
+
+```
+ssl_session_ticket_key current.key;
+ssl_session_ticket_key previous.key;
+```
+
+The `file` must contain 80 or 48 bytes of random data and can be created using the following command:
+
+```
+openssl rand 80 > ticket.key
+```
+
+Depending on the file size either AES256 (for 80-byte keys, 1.11.8) or AES128 (for 48-byte keys) is used for encryption. 
+
+#### ssl_session_timeout
+Syntax: `ssl_session_timeout time;`  
+Context: rtmp, server  
+
+Specifies a time during which a client may reuse the session parameters. 
+
+#### ssl_crl
+Syntax: `ssl_crl file;`  
+Context: rtmp, server  
+
+Specifies a `file` with revoked certificates (CRL) in the PEM format used to verify client certificates.
+
+#### ssl_conf_command
+Syntax:	`ssl_conf_command name value;`  
+Context: rtmp, server  
+
+Sets arbitrary OpenSSL configuration commands.
+
+Several ssl_conf_command directives can be specified on the same level:
+
+```
+ssl_conf_command Options PrioritizeChaCha;
+ssl_conf_command Ciphersuites TLS_CHACHA20_POLY1305_SHA256;
+```
+
+These directives are inherited from the previous configuration level if and only if there are no ssl_conf_command directives defined on the current level.
+
+#### ssl_alpn
+Syntax: `ssl_alpn protocol ...;`  
+Context: rtmp, server  
+
+Specifies the list of supported ALPN protocols. One of the protocols must be negotiated if the client uses ALPN:
+
+```
+map $ssl_alpn_protocol $proxy {
+    h2                127.0.0.1:8001;
+    http/1.1          127.0.0.1:8002;
+}
+
+server {
+    listen      12346;
+    proxy_pass  $proxy;
+    ssl_alpn    h2 http/1.1;
+}
+```

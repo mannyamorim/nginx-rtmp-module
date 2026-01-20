@@ -40,6 +40,7 @@ typedef struct {
 
     unsigned                bind:1;
     unsigned                wildcard:1;
+    unsigned                ssl:1;
 #if (NGX_HAVE_INET6 && defined IPV6_V6ONLY)
     unsigned                ipv6only:2;
 #endif
@@ -56,6 +57,7 @@ typedef struct {
 typedef struct {
     ngx_rtmp_conf_ctx_t    *ctx;
     ngx_str_t               addr_text;
+    unsigned                ssl:1;
     unsigned                proxy_protocol:1;
 } ngx_rtmp_addr_conf_t;
 
@@ -96,6 +98,7 @@ typedef struct {
 
     unsigned                bind:1;
     unsigned                wildcard:1;
+    unsigned                ssl:1;
 #if (NGX_HAVE_INET6 && defined IPV6_V6ONLY)
     unsigned                ipv6only:2;
 #endif
@@ -258,6 +261,7 @@ typedef struct {
     ngx_int_t               in_chunk_size_changing;
 
     ngx_connection_t       *connection;
+    unsigned                ssl:1;
 
     /* circular buffer of RTMP message pointers */
     ngx_msec_t              timeout;
