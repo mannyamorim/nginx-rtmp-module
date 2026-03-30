@@ -116,13 +116,13 @@ ngx_rtmp_proxy_protocol_recv(ngx_event_t *rev)
         ngx_inet_set_port(addr.sockaddr, c->proxy_protocol->src_port);
 
         text = ngx_pnalloc(c->pool, NGX_SOCKADDR_STRLEN);
-        len = ngx_sock_ntop(addr.sockaddr, addr.socklen, text,
-                            NGX_SOCKADDR_STRLEN, 0);
-        if (len == 0) {
+        if (text == NULL) {
             goto failed;
         }
 
-        if (text == NULL) {
+        len = ngx_sock_ntop(addr.sockaddr, addr.socklen, text,
+                            NGX_SOCKADDR_STRLEN, 0);
+        if (len == 0) {
             goto failed;
         }
 
